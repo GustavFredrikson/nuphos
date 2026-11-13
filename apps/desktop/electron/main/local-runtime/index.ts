@@ -23,6 +23,14 @@ import { localFileConnectors } from './attachment-stream.ts'
 import { browserStreams } from './browser-streams.ts'
 import { readCliCache, writeCliCache } from './cli-cache.ts'
 import { agentEnv, readBundle } from './config.ts'
+import {
+  customProviderLaunch,
+  providerKeys,
+  readCustomProviders,
+  saveCustomProvider,
+  withProviderKey,
+  withProviderStatus,
+} from './custom-provider.ts'
 import { LocalRuntimeController } from './controller.ts'
 import { localToolStreams } from './cua-stream.ts'
 import { devBundleHint, watchDevBundle } from './dev-bundle.ts'
@@ -55,6 +63,7 @@ function bundleRoot(): string {
 }
 
 const findBundle = (): LocalRuntimeBundle | null => readBundle(bundleRoot())
+const ownDir = (userId: string) => path.join(dataDir(), 'users', userId)
 
 export async function userEnv(): Promise<NodeJS.ProcessEnv> {
   return { ...process.env, ...((await resolveShellEnv()) ?? {}) }
@@ -78,19 +87,20 @@ const controller: LocalRuntimeController = new LocalRuntimeController({
     return apiUrl()
   },
   userEnv,
-  probeCli: probeAgentCli,
+  probeCli: withProviderStatus(probeAgentCli),
   readUsage: readAgentUsage,
   readCliCache: (userId) => readCliCache(dataDir(), userId),
   writeCliCache: (userId, cli) => writeCliCache(dataDir(), userId, cli),
   onChange: broadcastState,
   prepareAgentHome,
   registerDevice: () => syncDeviceRegistration(),
-  createProcess: () => new OpenabProcess(),
-  probeModels: ({ provider, workspace, env, cliPath, agentHome }) => {
+  createProcess: () => withProviderKey(new OpenabProcess(), providerKeys),
+  probeModels: async ({ provider, workspace, env, cliPath, agentHome }) => {
     const bundle = findBundle()
     const adapter = bundle?.adapters[provider]
 
-    if (!bundle || !adapter) return Promise.reject(new Error('The local runtime is not bundled'))
+    if (!bundle || !adapter) throw new Error('The local runtime is not bundled')
+    const custom = await customProviderLaunch(providerKeys, provider, agentHome)
 
     return probeLocalModels({
       nodeExecPath: process.execPath,
@@ -109,6 +119,7 @@ const controller: LocalRuntimeController = new LocalRuntimeController({
         authKey: '',
         env,
       }),
+      ...(custom ? { secretEnv: custom.env, models: custom.models } : {}),
     })
   },
   createTunnel: (runtime, status, onChange, instances) => {
@@ -234,16 +245,32 @@ export function getLocalRuntimeState(): LocalRuntimeViewState {
   const bundle = findBundle()
   const incomplete = LOCAL_AGENT_PROVIDERS.some((provider) => !bundle?.adapters[provider])
   const devBundle = devBuild() && incomplete ? devBundleHint(bundleRoot()) : undefined
+  const state = controller.state()
 
   return {
-    ...controller.state(),
+    ...state,
     detectionDisabled: !deviceRegistrationAllowed(isDev),
     sleepPrevention: sleep.sleepState(),
     claudeLogin: logins.state('claude-code'),
     codexLogin: logins.state('codex'),
     deviceId: readDeviceIdentity().deviceId,
     ...(devBundle ? { devBundle } : {}),
+    ...(state.userId ? { customProviders: readCustomProviders(ownDir(state.userId)) } : {}),
   }
+}
+
+/** Saves this account's provider for one agent, or with null removes it, then restarts it. */
+export async function setLocalCustomProvider(
+  provider: unknown,
+  value: unknown,
+): Promise<LocalRuntimeState> {
+  const { userId } = controller.state()
+
+  if (!userId) throw new Error('Sign in to Nuphos first.')
+  await saveCustomProvider(providerKeys, ownDir(userId), userId, provider, value)
+  await controller.refresh(true, [provider === 'codex' ? 'codex' : 'claude-code'])
+
+  return getLocalRuntimeState()
 }
 
 export async function refreshLocalRuntime(): Promise<LocalRuntimeState> {

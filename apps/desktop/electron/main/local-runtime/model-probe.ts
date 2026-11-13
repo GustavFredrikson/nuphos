@@ -94,11 +94,15 @@ export function probeLocalModels(options: {
   adapter: string
   cwd: string
   env: Record<string, string>
+  /** A custom provider's key, which reaches the adapter only in its environment. */
+  secretEnv?: Record<string, string>
+  /** A custom provider's own model ids, offered instead of the adapter's list. */
+  models?: string[]
 }): Promise<LocalModelCatalog> {
   return new Promise((resolve, reject) => {
     const child = spawn(options.nodeExecPath, [options.adapter], {
       cwd: options.cwd,
-      env: options.env,
+      env: { ...options.env, ...options.secretEnv },
       stdio: ['pipe', 'pipe', 'ignore'],
       windowsHide: true,
     })
@@ -177,7 +181,14 @@ export function probeLocalModels(options: {
       const sessionId = String(session.sessionId)
       let configOptions = (session.configOptions ?? []) as ConfigOption[]
       const model = findOption(configOptions, 'model')
-      const { models, defaultModel } = modelChoices(model)
+      const advertised = modelChoices(model)
+      // Each id is still tried below, so one the adapter refuses is left out.
+      const { models, defaultModel } = options.models?.length
+        ? {
+            models: options.models.map((id) => ({ id, name: id })),
+            defaultModel: options.models[0],
+          }
+        : advertised
 
       if (!model || typeof model.currentValue !== 'string' || models.length === 0) {
         finish(new Error('The runtime did not advertise any models'))

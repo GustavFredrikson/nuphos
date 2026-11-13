@@ -10,12 +10,19 @@ import { useTextSwap } from '../../hooks/useTextSwap'
 import { t } from '../../i18n'
 import { isWindows } from '../../lib/platform'
 
+import { CustomProviderSettings } from './CustomProviderSettings'
 import { unbundledStatus } from './localAgentBundle'
 import { LocalAgentSignIn } from './LocalAgentSignIn'
 import { STATUS_DOT } from './runtimePresentation'
 
 import type { RuntimeStatusTone } from './runtimePresentation'
-import type { AgentCliStatus, CliLoginProvider, DevBundleHint, LocalAgentState } from '../../api'
+import type {
+  AgentCliStatus,
+  CliLoginProvider,
+  DevBundleHint,
+  LocalAgentState,
+  LocalRuntimeState,
+} from '../../api'
 
 export const LOCAL_AGENT_CARD = 'rounded-lg border border-line-control/70 bg-surface'
 
@@ -154,16 +161,18 @@ function CliStatus({ provider, cli }: { provider: CliLoginProvider; cli: AgentCl
   return (
     <div className="space-y-2 text-[12px] text-tertiary">
       <p>
-        {cli.loggedIn === true && cli.apiKey
-          ? t('Signed in with an API key.')
-          : cli.loggedIn === true
-            ? t('Signed in to {name}.', { name: agent.name })
-            : cli.loggedIn === null
-              ? t('Could not read the {name} sign-in. Check again or sign in.', {
-                  name: agent.name,
-                })
-              : t('Connect {name} to run your agents on this computer.', { name: agent.name })}
-        {cli.loggedIn && cli.account && <span> {cli.account}</span>}
+        {cli.customProvider
+          ? t('Using a custom provider ({host}).', { host: cli.customProvider })
+          : cli.loggedIn === true && cli.apiKey
+            ? t('Signed in with an API key.')
+            : cli.loggedIn === true
+              ? t('Signed in to {name}.', { name: agent.name })
+              : cli.loggedIn === null
+                ? t('Could not read the {name} sign-in. Check again or sign in.', {
+                    name: agent.name,
+                  })
+                : t('Connect {name} to run your agents on this computer.', { name: agent.name })}
+        {cli.loggedIn && !cli.customProvider && cli.account && <span> {cli.account}</span>}
         {cli.plan && <span> · {cli.plan}</span>}
         {cli.version && <span> · v{cli.version}</span>}
       </p>
@@ -176,7 +185,9 @@ function CliStatus({ provider, cli }: { provider: CliLoginProvider; cli: AgentCl
               : t('Sign in with {name}', { name: agent.name })
           }
         />
-        {cli.loggedIn === true && cli.apiKey && <RemoveApiKey provider={provider} />}
+        {cli.loggedIn === true && cli.apiKey && !cli.customProvider && (
+          <RemoveApiKey provider={provider} />
+        )}
         <UpdateButton provider={provider} />
       </div>
     </div>
@@ -213,12 +224,16 @@ export function LocalAgentCard({
   provider,
   agent,
   devBundle,
+  customProvider,
   onCheck,
+  onState,
 }: {
   provider: CliLoginProvider
   agent: LocalAgentState
   devBundle?: DevBundleHint
+  customProvider: NonNullable<LocalRuntimeState['customProviders']>[CliLoginProvider]
   onCheck: () => void
+  onState: (state: LocalRuntimeState) => void
 }) {
   const { name, connectors } = AGENT[provider]
   const status = agent.available ? statusLine(agent) : unbundledStatus(name, devBundle)
@@ -253,6 +268,14 @@ export function LocalAgentCard({
           {t('Check again')}
         </Button>
       </div>
+      {agent.available && (
+        <CustomProviderSettings
+          provider={provider}
+          name={name}
+          saved={customProvider}
+          onSaved={onState}
+        />
+      )}
     </div>
   )
 }

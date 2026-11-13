@@ -30,6 +30,8 @@ export type AgentCliStatus =
       account?: string
       /** Signed in with an API key rather than an account. The key itself never leaves the CLI. */
       apiKey?: true
+      /** The host of the user's own model provider, which stands in for a sign-in. */
+      customProvider?: string
       plan?: string
       /** Kept by a desktop app (Claude, ChatGPT), which updates it, even when reached through a symlink. */
       bundled?: true
